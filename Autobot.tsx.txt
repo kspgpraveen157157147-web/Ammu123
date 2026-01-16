@@ -1,0 +1,686 @@
+"use client"
+
+import { useState } from "react"
+import Navigation from "@/components/navigation"
+import { Button } from "@/components/ui/button"
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Copy, Download, CheckCircle, AlertCircle, Terminal, Play } from "lucide-react"
+
+export default function ScriptPage() {
+  const [copied, setCopied] = useState(false)
+
+  const standaloneScript = `// LUCIFER BOT v5.0 - Standalone Edition
+// Built-in prediction logic - NO API needed
+// Paste in browser console (Developer Tools > Console)
+
+(function() {
+    'use strict';
+    
+    // ========== CONFIGURATION ==========
+    const CONFIG = {
+        CHECK_INTERVAL: 1000,      // Check every 1 second
+        BET_WINDOW_START: 15,      // Start betting at 15 seconds
+        BET_WINDOW_END: 5,         // Stop betting at 5 seconds
+        AUTO_BET: true             // Enable auto betting
+    };
+
+    // ========== STATE ==========
+    let state = {
+        history: [],               // Prediction history
+        currentLevel: 1,           // Current level (1-4)
+        consecutiveLosses: 0,      // Track consecutive losses
+        lastIssue: null,           // Last processed issue
+        lastResult: null,          // Last game result (BIG/SMALL)
+        currentPrediction: null,   // Current prediction
+        betPlaced: null,           // Issue for which bet was placed
+        processing: false          // Prevent double processing
+    };
+
+    // Load state from localStorage
+    function loadState() {
+        try {
+            const saved = localStorage.getItem('lucifer_bot_state');
+            if (saved) {
+                const parsed = JSON.parse(saved);
+                state.history = parsed.history || [];
+                state.consecutiveLosses = parsed.consecutiveLosses || 0;
+                state.currentLevel = parsed.currentLevel || 1;
+                state.lastResult = parsed.lastResult || null;
+                console.log('[Lucifer] State loaded:', state);
+            }
+        } catch(e) {
+            console.error('[Lucifer] Failed to load state:', e);
+        }
+    }
+
+    // Save state to localStorage
+    function saveState() {
+        try {
+            localStorage.setItem('lucifer_bot_state', JSON.stringify({
+                history: state.history.slice(-50), // Keep last 50
+                consecutiveLosses: state.consecutiveLosses,
+                currentLevel: state.currentLevel,
+                lastResult: state.lastResult
+            }));
+        } catch(e) {
+            console.error('[Lucifer] Failed to save state:', e);
+        }
+    }
+
+    // ========== PREDICTION LOGIC ==========
+    
+    // Lucifer Mode: Predict based on last result
+    function luciferPredict(lastNumber) {
+        if (lastNumber === null || lastNumber === undefined) return 'BIG';
+        const num = parseInt(lastNumber);
+        // If last was BIG (5-9), predict BIG. If SMALL (0-4), predict SMALL
+        return num >= 5 ? 'BIG' : 'SMALL';
+    }
+
+    // Opposite Mode: Predict opposite of last result
+    function oppositePredict(lastResult) {
+        if (!lastResult) return 'BIG';
+        return lastResult === 'BIG' ? 'SMALL' : 'BIG';
+    }
+
+    // Determine level based on consecutive losses
+    function determineLevel() {
+        // Level 1: 0 losses, Level 2: 1 loss, Level 3: 2 losses, Level 4: 3 losses
+        // After 4 losses, reset to Level 1
+        const losses = state.consecutiveLosses % 4;
+        return losses + 1;
+    }
+
+    // Main prediction function
+    function getPrediction(lastNumber, lastResult) {
+        state.currentLevel = determineLevel();
+        
+        let prediction;
+        
+        // Level 1-2: Lucifer Mode
+        // Level 3-4: Opposite Mode
+        if (state.currentLevel <= 2) {
+            prediction = luciferPredict(lastNumber);
+            console.log('[Lucifer] Level', state.currentLevel, '- Lucifer Mode -> ', prediction);
+        } else {
+            prediction = oppositePredict(lastResult);
+            console.log('[Lucifer] Level', state.currentLevel, '- Opposite Mode -> ', prediction);
+        }
+        
+        return prediction;
+    }
+
+    // Update prediction result (WIN/LOSE)
+    function updateResult(issue, actualResult) {
+        const historyItem = state.history.find(h => h.issue === issue);
+        if (!historyItem || historyItem.status !== 'PENDING') return;
+        
+        const predicted = historyItem.prediction;
+        const isWin = predicted === actualResult;
+        
+        historyItem.status = isWin ? 'WIN' : 'LOSE';
+        historyItem.actual = actualResult;
+        
+        if (isWin) {
+            state.consecutiveLosses = 0;
+            console.log('[Lucifer] WIN! Reset to Level 1');
+        } else {
+            state.consecutiveLosses++;
+            console.log('[Lucifer] LOSE! Consecutive losses:', state.consecutiveLosses);
+        }
+        
+        state.lastResult = actualResult;
+        state.currentLevel = determineLevel();
+        saveState();
+        updateStatusDisplay();
+    }
+
+    // ========== DOM INTERACTION ==========
+
+    // Create status display
+    function createStatusDisplay() {
+        let display = document.getElementById('lucifer-status');
+        if (display) return display;
+        
+        display = document.createElement('div');
+        display.id = 'lucifer-status';
+        display.style.cssText = \`
+            position: fixed;
+            top: 10px;
+            right: 10px;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            color: #00ffff;
+            padding: 15px;
+            border-radius: 12px;
+            z-index: 999999;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            border: 2px solid #00ffff;
+            min-width: 200px;
+            box-shadow: 0 0 20px rgba(0, 255, 255, 0.3);
+        \`;
+        document.body.appendChild(display);
+        return display;
+    }
+
+    function updateStatusDisplay(msg, color) {
+        const display = createStatusDisplay();
+        const timer = getTimer();
+        const issue = state.lastIssue ? state.lastIssue.slice(-3) : '---';
+        const wins = state.history.filter(h => h.status === 'WIN').length;
+        const losses = state.history.filter(h => h.status === 'LOSE').length;
+        
+        display.innerHTML = \`
+            <div style="font-weight:bold;font-size:14px;color:#00ffff;margin-bottom:8px;">
+                LUCIFER BOT ~ \${state.currentLevel}/4 LVL
+            </div>
+            <div style="border-top:1px solid #00ffff44;padding-top:8px;margin-top:8px;">
+                <div style="color:\${color || '#00ffff'}">\${msg || 'Ready'}</div>
+                <div style="color:#888;margin-top:5px;">Timer: \${timer}s | ID: \${issue}</div>
+                <div style="color:#888;">Prediction: <span style="color:#ffff00;font-weight:bold;">\${state.currentPrediction || '---'}</span></div>
+                <div style="margin-top:5px;">
+                    <span style="color:#00ff00;">W:\${wins}</span> | 
+                    <span style="color:#ff4444;">L:\${losses}</span> |
+                    <span style="color:#ffaa00;">Streak:\${state.consecutiveLosses}</span>
+                </div>
+            </div>
+        \`;
+    }
+
+    // Get timer from page
+    function getTimer() {
+        // Method 1: Look for Time remaining text pattern
+        const text = document.body.innerText;
+        const match = text.match(/Time remaining[\\s\\S]{0,50}(\\d)\\s*(\\d)\\s*:\\s*(\\d)\\s*(\\d)/i);
+        if (match) {
+            const mins = parseInt(match[1] + match[2]);
+            const secs = parseInt(match[3] + match[4]);
+            return mins * 60 + secs;
+        }
+        
+        // Method 2: Look for countdown elements
+        const countdowns = document.querySelectorAll('[class*="time"], [class*="count"], [class*="timer"]');
+        for (const el of countdowns) {
+            const m = el.textContent.match(/(\\d{1,2}):(\\d{2})/);
+            if (m) return parseInt(m[1]) * 60 + parseInt(m[2]);
+        }
+        
+        // Method 3: Look for individual digit elements
+        const digits = document.querySelectorAll('[class*="digit"], [class*="num"]');
+        if (digits.length >= 4) {
+            const nums = Array.from(digits).map(d => d.textContent.trim()).filter(n => /^\\d$/.test(n));
+            if (nums.length >= 4) {
+                return parseInt(nums[0] + nums[1]) * 60 + parseInt(nums[2] + nums[3]);
+            }
+        }
+        
+        return -1;
+    }
+
+    // Get current issue number
+    function getIssue() {
+        const text = document.body.innerText;
+        const match = text.match(/(20\\d{14,18})/);
+        return match ? match[1] : null;
+    }
+
+    // Get last result number from game history
+    function getLastResultNumber() {
+        // Look for result history table
+        const tables = document.querySelectorAll('table, [class*="history"], [class*="record"]');
+        for (const table of tables) {
+            const cells = table.querySelectorAll('td, [class*="number"], [class*="result"]');
+            for (const cell of cells) {
+                const num = cell.textContent.trim();
+                if (/^[0-9]$/.test(num)) {
+                    return parseInt(num);
+                }
+            }
+        }
+        
+        // Look for recent numbers displayed
+        const circles = document.querySelectorAll('[class*="ball"], [class*="circle"], [class*="num"]');
+        for (const el of circles) {
+            const num = el.textContent.trim();
+            if (/^[0-9]$/.test(num) && el.offsetWidth > 0) {
+                return parseInt(num);
+            }
+        }
+        
+        // Look in Period/Number/Big Small table
+        const rows = document.querySelectorAll('tr, [class*="row"]');
+        for (const row of rows) {
+            const text = row.textContent;
+            const numMatch = text.match(/20\\d{14,18}[\\s\\S]{0,20}([0-9])\\s+(Big|Small)/i);
+            if (numMatch) {
+                return parseInt(numMatch[1]);
+            }
+        }
+        
+        return null;
+    }
+
+    // Get last result (BIG/SMALL) from history
+    function getLastResultSize() {
+        const lastNum = getLastResultNumber();
+        if (lastNum !== null) {
+            return lastNum >= 5 ? 'BIG' : 'SMALL';
+        }
+        
+        // Look for Big/Small text in history
+        const rows = document.querySelectorAll('tr, [class*="row"], [class*="record"]');
+        for (const row of rows) {
+            const text = row.textContent.toLowerCase();
+            if (text.includes('big')) return 'BIG';
+            if (text.includes('small')) return 'SMALL';
+        }
+        
+        return null;
+    }
+
+    // Find bet button
+    function findButton(text) {
+        const elements = document.querySelectorAll('div, button, span, a');
+        for (const el of elements) {
+            const content = el.textContent.trim().toLowerCase();
+            if (content === text.toLowerCase() && el.children.length <= 2) {
+                const rect = el.getBoundingClientRect();
+                if (rect.width > 30 && rect.height > 20) {
+                    return el;
+                }
+            }
+        }
+        return null;
+    }
+
+    // Find confirm button
+    function findConfirmButton() {
+        const elements = document.querySelectorAll('div, button');
+        for (const el of elements) {
+            const text = el.textContent;
+            if (text.includes('Total amount') && text.includes('₹')) {
+                return el;
+            }
+        }
+        return null;
+    }
+
+    // Simulate click
+    function simulateClick(element) {
+        if (!element) return false;
+        
+        element.scrollIntoView({ block: 'center', behavior: 'instant' });
+        
+        const events = ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click'];
+        events.forEach(eventType => {
+            const event = new PointerEvent(eventType, {
+                bubbles: true,
+                cancelable: true,
+                view: window,
+                pointerId: 1,
+                pointerType: 'touch'
+            });
+            element.dispatchEvent(event);
+        });
+        
+        // Also try direct click
+        if (element.click) element.click();
+        
+        return true;
+    }
+
+    // Place bet
+    async function placeBet(prediction, issue) {
+        if (state.processing || state.betPlaced === issue) return;
+        state.processing = true;
+        
+        console.log('[Lucifer] Placing bet:', prediction, 'for issue:', issue);
+        updateStatusDisplay('Betting ' + prediction + '...', '#ffff00');
+        
+        // Find and click Big/Small button
+        const betButton = findButton(prediction);
+        if (!betButton) {
+            console.error('[Lucifer] Bet button not found:', prediction);
+            updateStatusDisplay('Button not found!', '#ff4444');
+            state.processing = false;
+            return;
+        }
+        
+        simulateClick(betButton);
+        
+        // Wait for popup
+        await new Promise(r => setTimeout(r, 600));
+        
+        // Wait for Total amount button to appear
+        let attempts = 0;
+        while (!document.body.innerText.includes('Total amount') && attempts < 30) {
+            await new Promise(r => setTimeout(r, 150));
+            attempts++;
+        }
+        
+        await new Promise(r => setTimeout(r, 400));
+        
+        // Find and click confirm button
+        const confirmButton = findConfirmButton();
+        if (confirmButton) {
+            simulateClick(confirmButton);
+            state.betPlaced = issue;
+            
+            // Add to history
+            state.history.push({
+                issue: issue,
+                prediction: prediction,
+                level: state.currentLevel,
+                status: 'PENDING',
+                timestamp: Date.now()
+            });
+            
+            saveState();
+            console.log('[Lucifer] Bet placed successfully:', prediction);
+            updateStatusDisplay('BET PLACED: ' + prediction, '#00ff00');
+        } else {
+            console.error('[Lucifer] Confirm button not found');
+            updateStatusDisplay('Confirm failed!', '#ff4444');
+        }
+        
+        state.processing = false;
+    }
+
+    // ========== MAIN LOOP ==========
+    async function mainLoop() {
+        const currentIssue = getIssue();
+        const timer = getTimer();
+        
+        // Update result for previous issue if we have a new issue
+        if (currentIssue && currentIssue !== state.lastIssue && state.lastIssue) {
+            const lastResult = getLastResultSize();
+            if (lastResult) {
+                updateResult(state.lastIssue, lastResult);
+            }
+        }
+        
+        // Track current issue
+        if (currentIssue && currentIssue !== state.lastIssue) {
+            state.lastIssue = currentIssue;
+            state.betPlaced = null;
+            
+            // Generate new prediction
+            const lastNumber = getLastResultNumber();
+            const lastSize = getLastResultSize();
+            state.currentPrediction = getPrediction(lastNumber, lastSize);
+            
+            console.log('[Lucifer] New issue:', currentIssue, '| Prediction:', state.currentPrediction, '| Level:', state.currentLevel);
+        }
+        
+        // Update display
+        if (timer < 0) {
+            updateStatusDisplay('Reading page...', '#888888');
+            return;
+        }
+        
+        if (timer > CONFIG.BET_WINDOW_START) {
+            updateStatusDisplay('Waiting... ' + timer + 's', '#888888');
+            return;
+        }
+        
+        if (timer < CONFIG.BET_WINDOW_END) {
+            updateStatusDisplay('Betting closed', '#888888');
+            return;
+        }
+        
+        if (state.betPlaced === currentIssue) {
+            updateStatusDisplay('Bet done! Waiting result...', '#00ff00');
+            return;
+        }
+        
+        // Place bet
+        if (CONFIG.AUTO_BET && state.currentPrediction && currentIssue) {
+            await placeBet(state.currentPrediction, currentIssue);
+        } else {
+            updateStatusDisplay('Signal: ' + (state.currentPrediction || '---'), '#00ffff');
+        }
+    }
+
+    // ========== INITIALIZATION ==========
+    function init() {
+        console.log('[Lucifer] Initializing Lucifer Bot v5.0 - Standalone Edition');
+        
+        // Load saved state
+        loadState();
+        
+        // Create status display
+        createStatusDisplay();
+        updateStatusDisplay('Starting...', '#00ffff');
+        
+        // Start main loop
+        setInterval(mainLoop, CONFIG.CHECK_INTERVAL);
+        
+        // Run immediately
+        setTimeout(mainLoop, 500);
+        
+        console.log('[Lucifer] Bot started! Level:', state.currentLevel, '| Losses:', state.consecutiveLosses);
+    }
+
+    // Start
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', init);
+    } else {
+        init();
+    }
+    
+    // Expose for debugging
+    window.LuciferBot = {
+        state: state,
+        getTimer: getTimer,
+        getIssue: getIssue,
+        getLastResultNumber: getLastResultNumber,
+        getLastResultSize: getLastResultSize,
+        getPrediction: getPrediction,
+        placeBet: placeBet,
+        clearHistory: () => { state.history = []; state.consecutiveLosses = 0; saveState(); }
+    };
+    
+    console.log('[Lucifer] Debug: window.LuciferBot available');
+})();`
+
+  const copyToClipboard = async () => {
+    try {
+      await navigator.clipboard.writeText(standaloneScript)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 3000)
+    } catch (err) {
+      console.error("Failed to copy:", err)
+    }
+  }
+
+  const downloadScript = () => {
+    const blob = new Blob([standaloneScript], { type: "text/javascript" })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement("a")
+    a.href = url
+    a.download = "lucifer-bot-standalone.js"
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
+  }
+
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950">
+      <Navigation />
+
+      <main className="container mx-auto px-4 py-8 pt-24 space-y-8">
+        <div className="text-center space-y-4">
+          <h1 className="text-3xl font-bold text-cyan-400">Lucifer Bot - Standalone Script</h1>
+          <p className="text-slate-400">Built-in prediction logic - No API required</p>
+        </div>
+
+        <Card className="bg-slate-900/50 border-cyan-500/30 max-w-4xl mx-auto">
+          <CardHeader>
+            <CardTitle className="text-cyan-400 flex items-center gap-2">
+              <Terminal className="w-5 h-5" />
+              Console Method (Recommended)
+            </CardTitle>
+            <CardDescription className="text-slate-400">
+              Paste directly in browser Developer Tools console
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-6">
+            {/* Features */}
+            <div className="bg-cyan-500/10 border border-cyan-500/30 rounded-lg p-4">
+              <h4 className="font-semibold text-cyan-400 mb-2">Built-in Features:</h4>
+              <ul className="list-disc list-inside space-y-1 text-slate-300 text-sm">
+                <li>
+                  <strong>Level 1-2:</strong> Lucifer Mode (predict based on last number)
+                </li>
+                <li>
+                  <strong>Level 3-4:</strong> Opposite Mode (predict opposite of last result)
+                </li>
+                <li>
+                  <strong>Auto Level Switch:</strong> Increments on each loss, resets on win
+                </li>
+                <li>
+                  <strong>History Tracking:</strong> Saves WIN/LOSE history in browser
+                </li>
+                <li>
+                  <strong>No API Required:</strong> Works completely offline
+                </li>
+              </ul>
+            </div>
+
+            {/* Instructions */}
+            <div className="bg-green-500/10 border border-green-500/30 rounded-lg p-4">
+              <h4 className="font-semibold text-green-400 mb-2">Step-by-Step Instructions:</h4>
+              <ol className="list-decimal list-inside space-y-2 text-slate-300 text-sm">
+                <li>
+                  Open{" "}
+                  <code className="bg-slate-800 px-2 py-0.5 rounded text-cyan-400">
+                    tashanwin.ink/#/saasLottery/WinGo
+                  </code>
+                </li>
+                <li>
+                  Open Developer Tools:
+                  <ul className="list-disc list-inside ml-4 mt-1 text-slate-400">
+                    <li>
+                      <strong>Kiwi Browser:</strong> Menu (3 dots) → Developer tools
+                    </li>
+                    <li>
+                      <strong>Chrome Mobile:</strong> Type{" "}
+                      <code className="bg-slate-800 px-1 rounded">chrome://inspect</code>
+                    </li>
+                    <li>
+                      <strong>Desktop:</strong> Press <code className="bg-slate-800 px-1 rounded">F12</code>
+                    </li>
+                  </ul>
+                </li>
+                <li>
+                  Click on <strong>"Console"</strong> tab
+                </li>
+                <li>Copy the script below and paste it</li>
+                <li>
+                  Press <strong>Enter</strong> to run
+                </li>
+                <li>Look for "LUCIFER BOT" status box on screen</li>
+              </ol>
+            </div>
+
+            {/* Buttons */}
+            <div className="flex gap-2">
+              <Button
+                onClick={copyToClipboard}
+                className={`flex-1 ${copied ? "bg-green-600 hover:bg-green-700" : "bg-cyan-600 hover:bg-cyan-700"}`}
+              >
+                {copied ? (
+                  <>
+                    <CheckCircle className="w-4 h-4 mr-2" />
+                    Copied!
+                  </>
+                ) : (
+                  <>
+                    <Copy className="w-4 h-4 mr-2" />
+                    Copy Script
+                  </>
+                )}
+              </Button>
+              <Button
+                onClick={downloadScript}
+                variant="outline"
+                className="border-cyan-500/50 text-cyan-400 hover:bg-cyan-500/10 bg-transparent"
+              >
+                <Download className="w-4 h-4 mr-2" />
+                Download
+              </Button>
+            </div>
+
+            {/* Script Preview */}
+            <div className="bg-slate-950 rounded-lg p-4 overflow-x-auto max-h-96 overflow-y-auto">
+              <pre className="text-xs text-slate-300 whitespace-pre-wrap">{standaloneScript}</pre>
+            </div>
+
+            {/* Important Notes */}
+            <div className="bg-yellow-500/10 border border-yellow-500/30 rounded-lg p-4">
+              <div className="flex items-start gap-2">
+                <AlertCircle className="w-5 h-5 text-yellow-500 mt-0.5" />
+                <div>
+                  <h4 className="font-semibold text-yellow-400">Important Notes:</h4>
+                  <ul className="text-sm text-slate-400 mt-1 space-y-1">
+                    <li>- Script saves history in browser localStorage</li>
+                    <li>- Paste again after page refresh</li>
+                    <li>
+                      - Debug: Type <code className="bg-slate-800 px-1 rounded">LuciferBot.state</code> in console
+                    </li>
+                    <li>
+                      - Reset: Type <code className="bg-slate-800 px-1 rounded">LuciferBot.clearHistory()</code>
+                    </li>
+                  </ul>
+                </div>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Quick Reference */}
+        <Card className="bg-slate-900/50 border-green-500/30 max-w-4xl mx-auto">
+          <CardHeader>
+            <CardTitle className="text-green-400 flex items-center gap-2">
+              <Play className="w-5 h-5" />
+              Prediction Logic Reference
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="bg-slate-800/50 rounded-lg p-4">
+                <h4 className="font-semibold text-cyan-400 mb-2">Lucifer Mode (Level 1-2)</h4>
+                <p className="text-sm text-slate-400">
+                  Predicts based on last result number:
+                  <br />- If last number is 0-4 (SMALL) → Predict SMALL
+                  <br />- If last number is 5-9 (BIG) → Predict BIG
+                </p>
+              </div>
+              <div className="bg-slate-800/50 rounded-lg p-4">
+                <h4 className="font-semibold text-purple-400 mb-2">Opposite Mode (Level 3-4)</h4>
+                <p className="text-sm text-slate-400">
+                  Predicts opposite of last result:
+                  <br />- If last result was BIG → Predict SMALL
+                  <br />- If last result was SMALL → Predict BIG
+                </p>
+              </div>
+              <div className="bg-slate-800/50 rounded-lg p-4 md:col-span-2">
+                <h4 className="font-semibold text-yellow-400 mb-2">Level System</h4>
+                <p className="text-sm text-slate-400">
+                  Level increases on each loss, resets to 1 on any win:
+                  <br />
+                  <span className="text-green-400">0 losses = Level 1</span> →
+                  <span className="text-green-400"> 1 loss = Level 2</span> →
+                  <span className="text-purple-400"> 2 losses = Level 3</span> →
+                  <span className="text-purple-400"> 3 losses = Level 4</span> →
+                  <span className="text-green-400"> 4 losses = Back to Level 1</span>
+                </p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      </main>
+    </div>
+  )
+}
